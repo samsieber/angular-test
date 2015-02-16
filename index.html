@@ -2,13 +2,19 @@
 	<head>
 		<script src="https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.3.13/angular.min.js"></script>
 		<script>
-			var v;
 			angular.module('app', [])
+
+			// Services.js, which is really just provides a model class for the table
+			//
+			// It's a service and not a factory because it give us a constructor
+			// I would have defined a constant, but I'm not sure if you can define
+			// dependencies with those
 			.service("BasicTableModel",function(){
-				// create a table that is an array of cells
-				// each cell presents a getter/setter into the table
-				// also stores it's location and parent
-				// set things to debounce as well
+				// Create a table that is an array of cells
+				// 		each cell presents a getter/setter into the table
+				// 		and also stores it's location and parent
+				// This more or less creates a unidirectional data flow 
+				//   with the cell as the action source/dispatcher
 				function Table(cellsWide){
 					// This is the raw internal data
 					// Everything else is generated off / based off this
@@ -19,11 +25,14 @@
 
 					this.initData();
 				}
+
 				Table.prototype.initData = function(){
 					this.addRow();
 				}
+
 				// No-op function that can be overriden for a listener
 				Table.prototype.updated = function(){};
+
 				// Getter/Setter of a cell
 				Table.prototype.cellValue = function(row, col, value){
 					if (value === undefined){
@@ -33,7 +42,7 @@
 						this.updated(row, col);
 					}
 				}
-				// Adds a row
+
 				Table.prototype.addRow = function(){
 					var rowIndex = this._data.length;
 					var dataRow = [];
@@ -52,17 +61,20 @@
 					this.row = row;
 					this.col = col;
 				}
+
 				// The provided getter/setter - calls the proper one on the table
 				Cell.prototype.value = function(value){
 					return this.table.cellValue(this.row, this.col, value)
 				}
+
 				return Table
 			})
 			.service("AdvancedTableModel", function(BasicTableModel){
-				// create a table that is an array of cells
-				// each cell presents a getter/setter into the table
-				// also stores it's location and parent
-				// set things to debounce as well
+				// Adds row, column and overall totals
+				//
+				// We also do wonky math: multiply each cell by
+				//   it's column number (starting with one) for
+				//   calculating totals
 				Table.prototype = new BasicTableModel(0);
 				function Table(cellsWide){
 					this.colTotals = []
@@ -70,33 +82,40 @@
 					this.total = 0;
 					BasicTableModel.call(this, cellsWide);
 				}
+
+				// OVERRIDEN to add column totals
 				Table.prototype.initData = function(){
 					BasicTableModel.prototype.initData.call(this);
 					for (var i = 0; i < this.width; i++){
 						this.colTotals[i] = 0;
 					}
 				}
+
+				// OVERRIDEN to update totals
 				Table.prototype.updated = function(row, col){
 					this.rowTotals[row] = this.sumRow(row);
 					this.colTotals[col] = this.sumCol(col);
 					this.total = this.sumAll();
-					console.log(this.total);
+					console.log(this);
 				};
+
 				Table.prototype.sumAll = function(){
 					return this.rowTotals.reduce(function(total, current) {
 					  	return total + current;
 					});
 				}
 				Table.prototype.sumRow = function(row){
-					return this._data[row].reduce(function(total, current) {
-					  	return total + current;
-					});
+					return this._data[row].reduce(function(total, current, columnIndex) {
+					  	return total + current * (columnIndex + 1);
+					}, 0);
 				}
 				Table.prototype.sumCol = function(col){
 					return this._data.reduce(function(total, current) {
 					  	return total + current[col];
-					}, 0);
+					}, 0) * (col + 1);
 				}
+
+				//OVERRIDEN to add to the row totals
 				Table.prototype.addRow = function(){
 					BasicTableModel.prototype.addRow.call(this);
 					this.rowTotals.push(0);
@@ -104,39 +123,53 @@
 
 				return Table
 			})
-			.controller("TableCtrl",function($scope, BasicTableModel, AdvancedTableModel){
-				
 
+			// Controllers.js
+			.controller("TableCtrl",function($scope, BasicTableModel, AdvancedTableModel){
 				$scope.table = new AdvancedTableModel(7);
+
+				// We'll add in the hook to add a row right here.
+				$scope.table.updated = function(row, col){
+					AdvancedTableModel.prototype.updated.call(this, row, col);
+					if (row == this.cells.length - 1){
+						this.addRow();
+					}
+				}
 			})
-			console.log("HERE!");
 		</script>
 	</head>
 	<body ng-app="app">
 	<form>
 		<table ng-controller='TableCtrl'>
 			<thead>
-				<tr>
-					<th>
-					</th>
+				<tr>	
+					<td ng-repeat="colTotal in table.colTotals track by $index	">
+						Col {{$index+1}}
+					</td>
+					<td>
+						Total
+					</td>
 				</tr>
 			</thead>
 			<tbody>
 				<tr ng-repeat="row in table.cells">
 					<td ng-repeat="cell in row track by $index">
 						<input 
-							type="number" integer
+							type="number"
 							ng-model="cell.value" 
 							ng-model-options="{ getterSetter: true }">
-						</integer>
+						</input>
 					</td>
-					<td>{{sum_row($index)}}</td>
+					<td>{{table.rowTotals[$index] | currency}}</td>
 				</tr>
 			</tbody>
 			<tfoot>
 				<tr>
-					<td ng-repeat="col in cols">
-						{{sum_col($index)}}
+					<td ng-repeat="colTotal in table.colTotals track by $index	">
+						{{ colTotal | currency}}
+					</td>
+					<td>
+						{{table.total | currency}}
 					</td>
 				</tr>
 			</tfoot>
